@@ -33,15 +33,12 @@ OPTIONS_MODELE = {"temperature": 0.1}
 
 # Banques de formulations variees pour rendre Atlas moins robotique
 MESSAGES = {
-    # Utilise quand le nom du client == nom du dossier (cas normal, une seule variable a afficher)
     "document_classe_simple": [
         "C'est fait, classé dans le dossier « {dossier} ».",
         "Document rangé dans le dossier « {dossier} ».",
         "Classé sous « {dossier} ».",
         "Direction le dossier « {dossier} ».",
     ],
-    # Utilise quand le client identifie sur CE document differe du nom du dossier existant
-    # (ex : dossier existant sous "Martin Dupont", mais ce document mentionne "M. Martin DUPONT")
     "document_classe_variante": [
         "J'ai identifié {client} — reconnu comme le même client que le dossier existant « {dossier} ».",
         "'{client}' correspond au client déjà suivi sous « {dossier} », classé avec le reste de son dossier.",
@@ -303,8 +300,6 @@ def classer_documents():
         destination = dossier_client / fichier.name
         shutil.copy2(fichier, destination)
 
-        # Choix du message selon que le nom du client identifie correspond exactement
-        # au nom du dossier, ou s'il s'agit d'une variante regroupee avec un dossier existant
         if normaliser_nom(client) == normaliser_nom(dossier_client.name):
             print(f"  → {message_varie('document_classe_simple', dossier=dossier_client.name)}\n")
         else:
@@ -379,6 +374,100 @@ Documents :
     )
 
     return reponse["message"]["content"].strip()
+
+
+def lister_documents_client(nom_client):
+    """Liste les documents d'un client donne"""
+    dossier_destination = Path(DOSSIER_DESTINATION)
+    dossier_client = trouver_dossier_existant(nom_client, dossier_destination)
+
+    if not dossier_client:
+        print(f"Aucun dossier trouvé pour '{nom_client}'.")
+        return []
+
+    documents = [f for f in dossier_client.iterdir() if f.is_file()]
+
+    if not documents:
+        print(f"Le dossier de {dossier_client.name} est vide.")
+        return []
+
+    print(f"Documents de {dossier_client.name} :")
+    for document in documents:
+        print(f"  - {document.name}")
+
+    return documents
+
+
+def renommer_document(nom_client, ancien_nom, nouveau_nom):
+    """Renomme un document dans le dossier d'un client"""
+    dossier_destination = Path(DOSSIER_DESTINATION)
+    dossier_client = trouver_dossier_existant(nom_client, dossier_destination)
+
+    if not dossier_client:
+        print(f"Aucun dossier trouvé pour '{nom_client}'.")
+        return False
+
+    chemin_ancien = dossier_client / ancien_nom
+
+    if not chemin_ancien.exists():
+        print(f"Le document '{ancien_nom}' n'existe pas dans le dossier de {dossier_client.name}.")
+        return False
+
+    if not Path(nouveau_nom).suffix:
+        nouveau_nom = nouveau_nom + chemin_ancien.suffix
+
+    chemin_nouveau = dossier_client / nouveau_nom
+    chemin_ancien.rename(chemin_nouveau)
+
+    print(f"Document renommé : '{ancien_nom}' → '{nouveau_nom}' (dossier {dossier_client.name})")
+    return True
+
+
+def deplacer_document(nom_document, client_source, client_destination):
+    """Deplace un document du dossier d'un client vers un autre"""
+    dossier_destination_racine = Path(DOSSIER_DESTINATION)
+
+    dossier_source = trouver_dossier_existant(client_source, dossier_destination_racine)
+    if not dossier_source:
+        print(f"Aucun dossier trouvé pour '{client_source}'.")
+        return False
+
+    chemin_document = dossier_source / nom_document
+    if not chemin_document.exists():
+        print(f"Le document '{nom_document}' n'existe pas dans le dossier de {dossier_source.name}.")
+        return False
+
+    dossier_cible = trouver_dossier_existant(client_destination, dossier_destination_racine)
+    if not dossier_cible:
+        nom_dossier_cible = "".join(c for c in client_destination if c.isalnum() or c in " -_").strip()
+        dossier_cible = dossier_destination_racine / nom_dossier_cible
+        dossier_cible.mkdir(exist_ok=True)
+
+    chemin_cible = dossier_cible / nom_document
+    shutil.move(str(chemin_document), str(chemin_cible))
+
+    print(f"Document déplacé : '{nom_document}' de {dossier_source.name} vers {dossier_cible.name}")
+    return True
+
+
+def supprimer_document(nom_client, nom_document):
+    """Supprime un document du dossier d'un client (avec confirmation obligatoire cote appelant)"""
+    dossier_destination = Path(DOSSIER_DESTINATION)
+    dossier_client = trouver_dossier_existant(nom_client, dossier_destination)
+
+    if not dossier_client:
+        print(f"Aucun dossier trouvé pour '{nom_client}'.")
+        return False
+
+    chemin_document = dossier_client / nom_document
+
+    if not chemin_document.exists():
+        print(f"Le document '{nom_document}' n'existe pas dans le dossier de {dossier_client.name}.")
+        return False
+
+    chemin_document.unlink()
+    print(f"Document supprimé : '{nom_document}' (dossier {dossier_client.name})")
+    return True
 
 
 if __name__ == "__main__":

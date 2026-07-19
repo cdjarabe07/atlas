@@ -1,7 +1,11 @@
 import re
 import difflib
 import ollama
-from main import classer_documents, preparer_dossier_client
+from main import (
+    classer_documents, preparer_dossier_client,
+    lister_documents_client, renommer_document,
+    deplacer_document, supprimer_document
+)
 
 MOTS_DE_SORTIE = ["quitter", "exit", "quit", "stop", "sortir"]
 SEUIL_SIMILARITE = 0.75
@@ -28,12 +32,21 @@ def interpreter_instruction(instruction):
 Voici les actions possibles :
 - classer : classer automatiquement tous les documents du dossier documents_a_trier
 - preparer : preparer le dossier d'un client specifique avant un rendez-vous (necessite un nom de client)
+- lister : lister les documents d'un client (necessite un nom de client)
+- renommer : renommer un document d'un client (necessite nom de client, ancien nom de fichier, nouveau nom)
+- deplacer : deplacer un document vers un autre client (necessite nom de document, client source, client destination)
+- supprimer : supprimer un document d'un client (necessite nom de client, nom de document)
 
 Instruction de l'utilisateur : "{instruction}"
 
-Reponds UNIQUEMENT au format suivant, sans phrase ni explication :
-ACTION: <classer ou preparer ou inconnu>
-CLIENT: <nom du client si action=preparer, sinon laisser vide>
+Reponds UNIQUEMENT au format suivant, une ligne par champ, sans phrase ni explication.
+Laisse un champ vide (juste le prefixe) si non applicable a cette action.
+
+ACTION: <classer, preparer, lister, renommer, deplacer, supprimer ou inconnu>
+CLIENT: <nom du client concerne>
+CLIENT_DESTINATION: <nom du client destination, uniquement pour deplacer>
+DOCUMENT: <nom du fichier concerne, si applicable>
+NOUVEAU_NOM: <nouveau nom de fichier, uniquement pour renommer>
 """
 
     reponse = ollama.chat(
@@ -44,48 +57,84 @@ CLIENT: <nom du client si action=preparer, sinon laisser vide>
 
     texte_reponse = reponse["message"]["content"].strip()
 
-    action_match = re.search(r"ACTION:\s*(\w+)", texte_reponse, re.IGNORECASE)
-    client_match = re.search(r"CLIENT:\s*(.*)", texte_reponse, re.IGNORECASE)
+    def extraire_champ(nom_champ):
+        match = re.search(rf"{nom_champ}:\s*(.*)", texte_reponse, re.IGNORECASE)
+        return match.group(1).strip() if match else ""
 
-    action = action_match.group(1).lower() if action_match else "inconnu"
-    client = client_match.group(1).strip() if client_match else ""
+    action_brute = extraire_champ("ACTION").lower()
+    actions_valides = ["classer", "preparer", "lister", "renommer", "deplacer", "supprimer"]
+    action = next((a for a in actions_valides if a in action_brute), "inconnu")
 
-    if "classer" in action:
-        action = "classer"
-    elif "preparer" in action:
-        action = "preparer"
-    else:
-        action = "inconnu"
+    return {
+        "action": action,
+        "client": extraire_champ("CLIENT"),
+        "client_destination": extraire_champ("CLIENT_DESTINATION"),
+        "document": extraire_champ("DOCUMENT"),
+        "nouveau_nom": extraire_champ("NOUVEAU_NOM"),
+    }
 
-    return action, client
 
+def executer_action(details):
+    action = details["action"]
 
-def executer_action(action, client):
     if action == "classer":
         print("→ Lancement du classement des documents...\n")
         classer_documents()
+
     elif action == "preparer":
-        if not client:
-            print("Je n'ai pas compris pour quel client preparer le dossier.")
+        if not details["client"]:
+            print("Je n'ai pas compris pour quel client préparer le dossier.")
         else:
-            preparer_dossier_client(client)
+            preparer_dossier_client(details["client"])
+
+    elif action == "lister":
+        if not details["client"]:
+            print("Je n'ai pas compris de quel client tu parles.")
+        else:
+            lister_documents_client(details["client"])
+
+    elif action == "renommer":
+        if not details["client"] or not details["document"] or not details["nouveau_nom"]:
+            print("Il me manque des informations pour renommer (client, document actuel, et nouveau nom).")
+        else:
+            renommer_document(details["client"], details["document"], details["nouveau_nom"])
+
+    elif action == "deplacer":
+        if not details["client"] or not details["document"] or not details["client_destination"]:
+            print("Il me manque des informations pour déplacer (document, client source, client destination).")
+        else:
+            deplacer_document(details["document"], details["client"], details["client_destination"])
+
+    elif action == "supprimer":
+        if not details["client"] or not details["document"]:
+            print("Il me manque des informations pour supprimer (client et nom du document).")
+        else:
+            confirmation = input(
+                f"⚠️ Confirmer la suppression de '{details['document']}' "
+                f"du dossier de {details['client']} ? (oui/non) : "
+            )
+            if confirmation.strip().lower() in ["oui", "o", "yes", "y"]:
+                supprimer_document(details["client"], details["document"])
+            else:
+                print("Suppression annulée.")
+
     else:
-        print(f"Je n'ai pas compris cette instruction.")
+        print("Je n'ai pas compris cette instruction.")
 
 
 def main():
-    print("Atlas est pret. Que veux-tu faire ?")
+    print("Atlas est prêt. Que veux-tu faire ?")
     print("(tape 'quitter' pour sortir)\n")
 
     while True:
         instruction = input("> ")
 
         if est_une_demande_de_sortie(instruction):
-            print("A bientot.")
+            print("À bientôt.")
             break
 
-        action, client = interpreter_instruction(instruction)
-        executer_action(action, client)
+        details = interpreter_instruction(instruction)
+        executer_action(details)
         print()
 
 
