@@ -469,6 +469,40 @@ def supprimer_document(nom_client, nom_document):
     print(f"Document supprimé : '{nom_document}' (dossier {dossier_client.name})")
     return True
 
+def apercu_document(nom_client, nom_document, nb_caracteres_max=1500):
+    """Affiche un apercu du contenu d'un document sans avoir besoin de l'ouvrir ailleurs"""
+    dossier_destination = Path(DOSSIER_DESTINATION)
+    dossier_client = trouver_dossier_existant(nom_client, dossier_destination)
+
+    if not dossier_client:
+        print(f"Aucun dossier trouvé pour '{nom_client}'.")
+        return None
+
+    chemin_document = dossier_client / nom_document
+
+    if not chemin_document.exists():
+        print(f"Le document '{nom_document}' n'existe pas dans le dossier de {dossier_client.name}.")
+        return None
+
+    texte = lire_texte_fichier(chemin_document)
+
+    if not texte or not texte.strip():
+        print(f"Le document '{nom_document}' est vide ou son contenu n'a pas pu être lu.")
+        return None
+
+    texte_tronque = texte.strip()
+    a_ete_tronque = len(texte_tronque) > nb_caracteres_max
+
+    if a_ete_tronque:
+        texte_tronque = texte_tronque[:nb_caracteres_max]
+
+    print(f"--- Aperçu de {nom_document} ({dossier_client.name}) ---\n")
+    print(texte_tronque)
+
+    if a_ete_tronque:
+        print(f"\n[... document tronqué, {len(texte.strip())} caractères au total ...]")
+
+    return texte
 
 if __name__ == "__main__":
     classer_documents()

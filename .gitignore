@@ -1,0 +1,6 @@
+__pycache__/
+.pytest_cache/
+documents_a_trier/*
+documents_classes/*
+preparations_rdv/*
+*.pyc
