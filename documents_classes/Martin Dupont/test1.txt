@@ -1,0 +1,1 @@
+Set-Content -Path "Contrat_de_bail_commercial-Client_Martin_Dupont.txt" -Value "Contrat de bail commercial - Client Martin Dupont, 12 rue de la Paix" -Encoding utf8
