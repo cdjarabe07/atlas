@@ -1,6 +1,26 @@
 import re
+import difflib
 import ollama
 from main import classer_documents, preparer_dossier_client
+
+MOTS_DE_SORTIE = ["quitter", "exit", "quit", "stop", "sortir"]
+SEUIL_SIMILARITE = 0.75
+
+
+def est_une_demande_de_sortie(instruction):
+    """Verifie si l'instruction ressemble a une demande de sortie, meme avec une faute de frappe"""
+    instruction_nettoyee = instruction.strip().lower()
+
+    if not instruction_nettoyee:
+        return False
+
+    for mot in MOTS_DE_SORTIE:
+        similarite = difflib.SequenceMatcher(None, instruction_nettoyee, mot).ratio()
+        if similarite >= SEUIL_SIMILARITE:
+            return True
+
+    return False
+
 
 def interpreter_instruction(instruction):
     """Demande au modele local de comprendre l'intention de l'utilisateur"""
@@ -18,7 +38,8 @@ CLIENT: <nom du client si action=preparer, sinon laisser vide>
 
     reponse = ollama.chat(
         model="llama3.2",
-        messages=[{"role": "user", "content": prompt}]
+        messages=[{"role": "user", "content": prompt}],
+        options={"temperature": 0.1}
     )
 
     texte_reponse = reponse["message"]["content"].strip()
@@ -59,7 +80,7 @@ def main():
     while True:
         instruction = input("> ")
 
-        if instruction.lower() in ["quitter", "exit", "quit"]:
+        if est_une_demande_de_sortie(instruction):
             print("A bientot.")
             break
 

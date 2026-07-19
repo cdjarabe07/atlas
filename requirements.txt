@@ -6,3 +6,4 @@ fpdf2
 pytesseract
 pymupdf
 pillow
+streamlit

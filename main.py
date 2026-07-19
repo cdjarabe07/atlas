@@ -1,7 +1,7 @@
 import os
 import re
 import io
-import time
+import random
 import shutil
 from pathlib import Path
 from pypdf import PdfReader
@@ -29,6 +29,55 @@ NB_TENTATIVES_MAX = 3
 
 # Options du modele : temperature basse = reponses plus stables/deterministes
 OPTIONS_MODELE = {"temperature": 0.1}
+
+
+# Banques de formulations variees pour rendre Atlas moins robotique
+MESSAGES = {
+    # Utilise quand le nom du client == nom du dossier (cas normal, une seule variable a afficher)
+    "document_classe_simple": [
+        "C'est fait, classé dans le dossier « {dossier} ».",
+        "Document rangé dans le dossier « {dossier} ».",
+        "Classé sous « {dossier} ».",
+        "Direction le dossier « {dossier} ».",
+    ],
+    # Utilise quand le client identifie sur CE document differe du nom du dossier existant
+    # (ex : dossier existant sous "Martin Dupont", mais ce document mentionne "M. Martin DUPONT")
+    "document_classe_variante": [
+        "J'ai identifié {client} — reconnu comme le même client que le dossier existant « {dossier} ».",
+        "'{client}' correspond au client déjà suivi sous « {dossier} », classé avec le reste de son dossier.",
+        "Même client que « {dossier} » malgré une formulation différente ({client}), regroupé ensemble.",
+    ],
+    "client_inconnu": [
+        "Je n'ai pas réussi à identifier de client pour ce document, je le laisse de côté.",
+        "Aucun nom de client clair dans ce document — je préfère ne pas le classer au hasard.",
+        "Ce document reste non classé, faute d'avoir identifié un client précis.",
+    ],
+    "fichier_vide": [
+        "Ce fichier semble vide ou illisible, je l'ignore.",
+        "Rien à lire dans ce fichier, il est passé de côté.",
+    ],
+    "type_non_supporte": [
+        "Ce type de fichier ({extension}) n'est pas encore pris en charge.",
+        "Format {extension} non supporté pour l'instant, fichier ignoré.",
+    ],
+    "conflit_detecte": [
+        "⚠️ Attention : '{partie}' correspond à un client déjà existant, '{dossier_existant}'. Un conflit d'intérêts est possible.",
+        "⚠️ Signal de vigilance : '{partie}' apparaît aussi comme client dans le dossier '{dossier_existant}'.",
+        "⚠️ À vérifier avant d'aller plus loin : '{partie}' est déjà client sous le dossier '{dossier_existant}'.",
+    ],
+    "classement_termine": [
+        "Classement terminé.",
+        "Voilà, tous les documents ont été traités.",
+        "C'est fait, le classement est à jour.",
+    ],
+}
+
+
+def message_varie(type_message, **contexte):
+    """Choisit aleatoirement une formulation parmi celles disponibles pour ce type de message"""
+    formulations = MESSAGES.get(type_message, ["{fallback}"])
+    formulation_choisie = random.choice(formulations)
+    return formulation_choisie.format(**contexte)
 
 
 def extraire_texte_par_ocr(chemin_fichier):
@@ -64,7 +113,7 @@ def lire_texte_fichier(chemin_fichier):
             texte += page.extract_text() or ""
 
         if not texte.strip():
-            print("  → Aucun texte trouve, tentative de lecture par OCR (document scanne)...")
+            print("  → Aucun texte trouvé, tentative de lecture par OCR (document scanné)...")
             texte = extraire_texte_par_ocr(chemin_fichier)
 
         return texte
@@ -190,12 +239,14 @@ def classer_documents():
     dossier_destination = Path(DOSSIER_DESTINATION)
     dossier_destination.mkdir(exist_ok=True)
 
+    resultats = []
+
     if not dossier_source.exists():
         print(f"Le dossier '{DOSSIER_SOURCE}' n'existe pas.")
-        return
+        return resultats
 
     fichiers = list(dossier_source.iterdir())
-    print(f"{len(fichiers)} fichier(s) trouve(s) a traiter.\n")
+    print(f"{len(fichiers)} fichier(s) trouvé(s) à traiter.\n")
 
     for fichier in fichiers:
         if not fichier.is_file():
@@ -205,28 +256,39 @@ def classer_documents():
         extension = fichier.suffix.lower()
 
         if extension not in [".txt", ".pdf", ".docx"]:
-            print(f"  → Type de fichier non supporte ({extension}), ignore.\n")
+            print(f"  → {message_varie('type_non_supporte', extension=extension)}\n")
+            resultats.append({
+                "fichier": fichier.name, "statut": "ignore",
+                "client": None, "dossier": None, "conflits": []
+            })
             continue
 
         texte = lire_texte_fichier(fichier)
 
         if not texte or not texte.strip():
-            print(f"  → Fichier vide ou illisible, ignore.\n")
+            print(f"  → {message_varie('fichier_vide')}\n")
+            resultats.append({
+                "fichier": fichier.name, "statut": "vide",
+                "client": None, "dossier": None, "conflits": []
+            })
             continue
 
         client = identifier_client(texte)
 
         if client == "INCONNU" or not client:
-            print(f"  → Client non identifie, fichier laisse de cote.\n")
+            print(f"  → {message_varie('client_inconnu')}\n")
+            resultats.append({
+                "fichier": fichier.name, "statut": "inconnu",
+                "client": None, "dossier": None, "conflits": []
+            })
             continue
 
         parties = identifier_toutes_les_parties(texte)
         conflits = detecter_conflits_interets(parties, client, dossier_destination)
 
         if conflits:
-            print(f"  ⚠️  ALERTE CONFLIT D'INTERETS POTENTIEL :")
             for nom_partie, nom_dossier_existant in conflits:
-                print(f"      '{nom_partie}' correspond a un client existant : '{nom_dossier_existant}'")
+                print(f"  {message_varie('conflit_detecte', partie=nom_partie, dossier_existant=nom_dossier_existant)}")
             print()
 
         dossier_existant = trouver_dossier_existant(client, dossier_destination)
@@ -241,10 +303,20 @@ def classer_documents():
         destination = dossier_client / fichier.name
         shutil.copy2(fichier, destination)
 
-        print(f"  → Client identifie : {client}")
-        print(f"  → Classe dans : {destination}\n")
+        # Choix du message selon que le nom du client identifie correspond exactement
+        # au nom du dossier, ou s'il s'agit d'une variante regroupee avec un dossier existant
+        if normaliser_nom(client) == normaliser_nom(dossier_client.name):
+            print(f"  → {message_varie('document_classe_simple', dossier=dossier_client.name)}\n")
+        else:
+            print(f"  → {message_varie('document_classe_variante', client=client, dossier=dossier_client.name)}\n")
 
-    print("Classement termine.")
+        resultats.append({
+            "fichier": fichier.name, "statut": "classe",
+            "client": client, "dossier": dossier_client.name, "conflits": conflits
+        })
+
+    print(message_varie("classement_termine"))
+    return resultats
 
 
 def preparer_dossier_client(nom_client):
@@ -255,8 +327,8 @@ def preparer_dossier_client(nom_client):
     dossier_client = trouver_dossier_existant(nom_client, dossier_destination)
 
     if not dossier_client:
-        print(f"Aucun dossier trouve pour '{nom_client}'.")
-        print("Verifie l'orthographe, ou que ses documents ont bien ete classes.")
+        print(f"Aucun dossier trouvé pour '{nom_client}'.")
+        print("Vérifie l'orthographe, ou que ses documents ont bien été classés.")
         return
 
     dossier_preparation.mkdir(exist_ok=True)
@@ -269,7 +341,7 @@ def preparer_dossier_client(nom_client):
         print(f"Le dossier de {dossier_client.name} ne contient aucun document.")
         return
 
-    print(f"Preparation du dossier de {dossier_client.name} ({len(documents)} document(s))...\n")
+    print(f"Préparation du dossier de {dossier_client.name} ({len(documents)} document(s))...\n")
 
     contenu_complet = ""
     for document in documents:
@@ -283,9 +355,9 @@ def preparer_dossier_client(nom_client):
     fichier_resume = dossier_sortie / "RESUME.txt"
     fichier_resume.write_text(resume, encoding="utf-8")
 
-    print(f"Documents copies dans : {dossier_sortie}")
-    print(f"Resume genere : {fichier_resume}\n")
-    print("--- Resume ---")
+    print(f"Documents copiés dans : {dossier_sortie}")
+    print(f"Résumé généré : {fichier_resume}\n")
+    print("--- Résumé ---")
     print(resume)
 
 
