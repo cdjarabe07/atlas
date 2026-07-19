@@ -1,6 +1,7 @@
 import os
 import re
 import io
+import time
 import shutil
 from pathlib import Path
 from pypdf import PdfReader
@@ -22,6 +23,12 @@ CIVILITES = ["monsieur", "madame", "mademoiselle", "mme", "mlle", "m.", "m"]
 
 # Langue utilisee pour l'OCR (documents juridiques francais)
 LANGUE_OCR = "fra"
+
+# Nombre de tentatives si le modele repond INCONNU
+NB_TENTATIVES_MAX = 3
+
+# Options du modele : temperature basse = reponses plus stables/deterministes
+OPTIONS_MODELE = {"temperature": 0.1}
 
 
 def extraire_texte_par_ocr(chemin_fichier):
@@ -56,7 +63,6 @@ def lire_texte_fichier(chemin_fichier):
         for page in lecteur.pages:
             texte += page.extract_text() or ""
 
-        # Si aucun texte n'a ete extrait, le PDF est probablement scanne (image) -> OCR
         if not texte.strip():
             print("  → Aucun texte trouve, tentative de lecture par OCR (document scanne)...")
             texte = extraire_texte_par_ocr(chemin_fichier)
@@ -72,7 +78,7 @@ def lire_texte_fichier(chemin_fichier):
 
 
 def identifier_client(texte_document):
-    """Demande au modele local d'identifier le nom du client dans le texte"""
+    """Demande au modele local d'identifier le nom du client, avec plusieurs tentatives si echec"""
     prompt = f"""Voici le contenu d'un document juridique. 
 Identifie le nom complet du CLIENT du cabinet (pas l'avocat, pas le juge, pas l'huissier) concerne par ce document.
 Reponds UNIQUEMENT avec le nom, sans civilite (pas de M., Madame, Monsieur), sans phrase, sans explication.
@@ -82,13 +88,51 @@ Document :
 {texte_document[:2000]}
 """
 
+    for tentative in range(1, NB_TENTATIVES_MAX + 1):
+        reponse = ollama.chat(
+            model="llama3.2",
+            messages=[{"role": "user", "content": prompt}],
+            options=OPTIONS_MODELE
+        )
+
+        nom_client = reponse["message"]["content"].strip()
+
+        if nom_client and nom_client.upper() != "INCONNU":
+            return nom_client
+
+        if tentative < NB_TENTATIVES_MAX:
+            print(f"  → Tentative {tentative} infructueuse, nouvel essai...")
+
+    return "INCONNU"
+
+
+def identifier_toutes_les_parties(texte_document):
+    """Demande au modele d'identifier TOUTES les personnes/entites mentionnees (client + partie adverse + tiers)"""
+    prompt = f"""Voici le contenu d'un document juridique.
+Identifie TOUS les noms de personnes ou d'entreprises mentionnes qui sont des PARTIES a l'affaire
+(le client, la partie adverse, les tiers impliques). Ignore les avocats, juges, huissiers, notaires.
+
+Reponds UNIQUEMENT avec une liste de noms separes par des virgules, sans phrase, sans explication.
+Exemple de format : Jean Dupont, Societe ABC, Marie Martin
+Si aucun nom n'est identifiable, reponds exactement : AUCUN
+
+Document :
+{texte_document[:2000]}
+"""
+
     reponse = ollama.chat(
         model="llama3.2",
-        messages=[{"role": "user", "content": prompt}]
+        messages=[{"role": "user", "content": prompt}],
+        options=OPTIONS_MODELE
     )
 
-    nom_client = reponse["message"]["content"].strip()
-    return nom_client
+    texte_reponse = reponse["message"]["content"].strip()
+
+    if texte_reponse.upper() == "AUCUN" or not texte_reponse:
+        return []
+
+    noms = [nom.strip() for nom in texte_reponse.split(",") if nom.strip()]
+    return noms
 
 
 def normaliser_nom(nom):
@@ -117,8 +161,31 @@ def trouver_dossier_existant(nom_client, dossier_destination):
     return None
 
 
+def detecter_conflits_interets(parties_mentionnees, client_principal, dossier_destination):
+    """Verifie si une partie mentionnee (autre que le client principal) correspond a un client existant"""
+    conflits_detectes = []
+
+    if not dossier_destination.exists():
+        return conflits_detectes
+
+    nom_normalise_client_principal = normaliser_nom(client_principal)
+
+    for partie in parties_mentionnees:
+        nom_normalise_partie = normaliser_nom(partie)
+
+        if nom_normalise_partie == nom_normalise_client_principal:
+            continue
+
+        dossier_correspondant = trouver_dossier_existant(partie, dossier_destination)
+
+        if dossier_correspondant:
+            conflits_detectes.append((partie, dossier_correspondant.name))
+
+    return conflits_detectes
+
+
 def classer_documents():
-    """Parcourt le dossier source et classe chaque document par client"""
+    """Parcourt le dossier source et classe chaque document par client, avec detection de conflits"""
     dossier_source = Path(DOSSIER_SOURCE)
     dossier_destination = Path(DOSSIER_DESTINATION)
     dossier_destination.mkdir(exist_ok=True)
@@ -152,6 +219,15 @@ def classer_documents():
         if client == "INCONNU" or not client:
             print(f"  → Client non identifie, fichier laisse de cote.\n")
             continue
+
+        parties = identifier_toutes_les_parties(texte)
+        conflits = detecter_conflits_interets(parties, client, dossier_destination)
+
+        if conflits:
+            print(f"  ⚠️  ALERTE CONFLIT D'INTERETS POTENTIEL :")
+            for nom_partie, nom_dossier_existant in conflits:
+                print(f"      '{nom_partie}' correspond a un client existant : '{nom_dossier_existant}'")
+            print()
 
         dossier_existant = trouver_dossier_existant(client, dossier_destination)
 
@@ -226,7 +302,8 @@ Documents :
 
     reponse = ollama.chat(
         model="llama3.2",
-        messages=[{"role": "user", "content": prompt}]
+        messages=[{"role": "user", "content": prompt}],
+        options=OPTIONS_MODELE
     )
 
     return reponse["message"]["content"].strip()
