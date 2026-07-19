@@ -1,18 +1,19 @@
+import re
 import ollama
-from main import classer_documents
+from main import classer_documents, preparer_dossier_client
 
 def interpreter_instruction(instruction):
-    """Demande au modèle local de comprendre l'intention de l'utilisateur"""
-    prompt = f"""Tu es un assistant qui contrôle un programme de classement de documents juridiques.
+    """Demande au modele local de comprendre l'intention de l'utilisateur"""
+    prompt = f"""Tu es un assistant qui controle un programme de gestion documentaire juridique.
 Voici les actions possibles :
 - classer : classer automatiquement tous les documents du dossier documents_a_trier
+- preparer : preparer le dossier d'un client specifique avant un rendez-vous (necessite un nom de client)
 
 Instruction de l'utilisateur : "{instruction}"
 
-Réponds UNIQUEMENT avec un seul mot, sans guillemets, sans ponctuation, sans phrase :
-classer
-ou
-inconnu
+Reponds UNIQUEMENT au format suivant, sans phrase ni explication :
+ACTION: <classer ou preparer ou inconnu>
+CLIENT: <nom du client si action=preparer, sinon laisser vide>
 """
 
     reponse = ollama.chat(
@@ -20,39 +21,50 @@ inconnu
         messages=[{"role": "user", "content": prompt}]
     )
 
-    action_brute = reponse["message"]["content"].strip().lower()
+    texte_reponse = reponse["message"]["content"].strip()
 
-    # Nettoyage : on enlève guillemets, points, espaces superflus
-    action_nettoyee = action_brute.strip('."\'` \n')
+    action_match = re.search(r"ACTION:\s*(\w+)", texte_reponse, re.IGNORECASE)
+    client_match = re.search(r"CLIENT:\s*(.*)", texte_reponse, re.IGNORECASE)
 
-    # On vérifie si "classer" est présent dans la réponse, plutôt qu'une égalité stricte
-    if "classer" in action_nettoyee:
-        return "classer"
+    action = action_match.group(1).lower() if action_match else "inconnu"
+    client = client_match.group(1).strip() if client_match else ""
+
+    if "classer" in action:
+        action = "classer"
+    elif "preparer" in action:
+        action = "preparer"
     else:
-        return "inconnu"
+        action = "inconnu"
+
+    return action, client
 
 
-def executer_action(action):
+def executer_action(action, client):
     if action == "classer":
         print("→ Lancement du classement des documents...\n")
         classer_documents()
+    elif action == "preparer":
+        if not client:
+            print("Je n'ai pas compris pour quel client preparer le dossier.")
+        else:
+            preparer_dossier_client(client)
     else:
-        print(f"Je n'ai pas compris cette instruction (action détectée : '{action}').")
+        print(f"Je n'ai pas compris cette instruction.")
 
 
 def main():
-    print("Atlas est prêt. Que veux-tu faire ?")
+    print("Atlas est pret. Que veux-tu faire ?")
     print("(tape 'quitter' pour sortir)\n")
 
     while True:
         instruction = input("> ")
 
         if instruction.lower() in ["quitter", "exit", "quit"]:
-            print("À bientôt.")
+            print("A bientot.")
             break
 
-        action = interpreter_instruction(instruction)
-        executer_action(action)
+        action, client = interpreter_instruction(instruction)
+        executer_action(action, client)
         print()
 
 
