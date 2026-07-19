@@ -3,3 +3,6 @@ python-docx
 ollama
 pytest
 fpdf2
+pytesseract
+pymupdf
+pillow

@@ -1,10 +1,14 @@
 import os
 import re
+import io
 import shutil
 from pathlib import Path
 from pypdf import PdfReader
 from docx import Document
 import ollama
+import pytesseract
+import fitz  # PyMuPDF
+from PIL import Image
 
 # Dossier contenant les documents à trier
 DOSSIER_SOURCE = "documents_a_trier"
@@ -16,9 +20,31 @@ DOSSIER_PREPARATION = "preparations_rdv"
 # Civilites et titres a ignorer pour comparer les noms
 CIVILITES = ["monsieur", "madame", "mademoiselle", "mme", "mlle", "m.", "m"]
 
+# Langue utilisee pour l'OCR (documents juridiques francais)
+LANGUE_OCR = "fra"
+
+
+def extraire_texte_par_ocr(chemin_fichier):
+    """Convertit chaque page d'un PDF en image et lit le texte via OCR (Tesseract)"""
+    texte_ocr = ""
+
+    document_pdf = fitz.open(str(chemin_fichier))
+
+    for numero_page in range(len(document_pdf)):
+        page = document_pdf[numero_page]
+        pixmap = page.get_pixmap(dpi=300)
+        image_bytes = pixmap.tobytes("png")
+        image = Image.open(io.BytesIO(image_bytes))
+
+        texte_page = pytesseract.image_to_string(image, lang=LANGUE_OCR)
+        texte_ocr += texte_page + "\n"
+
+    document_pdf.close()
+    return texte_ocr
+
 
 def lire_texte_fichier(chemin_fichier):
-    """Extrait le texte d'un fichier .txt, .pdf ou .docx"""
+    """Extrait le texte d'un fichier .txt, .pdf ou .docx (avec repli sur l'OCR si necessaire)"""
     extension = chemin_fichier.suffix.lower()
 
     if extension == ".txt":
@@ -29,6 +55,12 @@ def lire_texte_fichier(chemin_fichier):
         texte = ""
         for page in lecteur.pages:
             texte += page.extract_text() or ""
+
+        # Si aucun texte n'a ete extrait, le PDF est probablement scanne (image) -> OCR
+        if not texte.strip():
+            print("  → Aucun texte trouve, tentative de lecture par OCR (document scanne)...")
+            texte = extraire_texte_par_ocr(chemin_fichier)
+
         return texte
 
     elif extension == ".docx":
