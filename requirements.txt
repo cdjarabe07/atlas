@@ -2,3 +2,4 @@ pypdf
 python-docx
 ollama
 pytest
+fpdf2
