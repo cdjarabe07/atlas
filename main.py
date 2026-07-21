@@ -504,5 +504,28 @@ def apercu_document(nom_client, nom_document, nb_caracteres_max=1500):
 
     return texte
 
+def ouvrir_document(nom_client, nom_document):
+    """Ouvre un document avec le logiciel associe par defaut sur le systeme (Word, Adobe, etc.)"""
+    dossier_destination = Path(DOSSIER_DESTINATION)
+    dossier_client = trouver_dossier_existant(nom_client, dossier_destination)
+
+    if not dossier_client:
+        print(f"Aucun dossier trouvé pour '{nom_client}'.")
+        return False
+
+    chemin_document = dossier_client / nom_document
+
+    if not chemin_document.exists():
+        print(f"Le document '{nom_document}' n'existe pas dans le dossier de {dossier_client.name}.")
+        return False
+
+    try:
+        os.startfile(str(chemin_document))
+        print(f"Ouverture de '{nom_document}' avec le logiciel associé...")
+        return True
+    except OSError as erreur:
+        print(f"Impossible d'ouvrir ce document : {erreur}")
+        return False
+
 if __name__ == "__main__":
     classer_documents()

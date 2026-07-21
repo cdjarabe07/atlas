@@ -4,7 +4,8 @@ import ollama
 from main import (
     classer_documents, preparer_dossier_client,
     lister_documents_client, renommer_document,
-    deplacer_document, supprimer_document, apercu_document
+    deplacer_document, supprimer_document,
+    apercu_document, ouvrir_document
 )
 
 MOTS_DE_SORTIE = ["quitter", "exit", "quit", "stop", "sortir"]
@@ -37,13 +38,14 @@ Voici les actions possibles :
 - deplacer : deplacer un document vers un autre client (necessite nom de document, client source, client destination)
 - supprimer : supprimer un document d'un client (necessite nom de client, nom de document)
 - apercu : afficher le contenu d'un document specifique (necessite nom de client, nom de document)
+- ouvrir : ouvrir un document avec son logiciel associe (necessite nom de client, nom de document)
 
 Instruction de l'utilisateur : "{instruction}"
 
 Reponds UNIQUEMENT au format suivant, une ligne par champ, sans phrase ni explication.
 Laisse un champ vide (juste le prefixe) si non applicable a cette action.
 
-ACTION: <classer, preparer, lister, renommer, deplacer, supprimer, apercu ou inconnu>
+ACTION: <classer, preparer, lister, renommer, deplacer, supprimer, apercu, ouvrir ou inconnu>
 CLIENT: <nom du client concerne>
 CLIENT_DESTINATION: <nom du client destination, uniquement pour deplacer>
 DOCUMENT: <nom du fichier concerne, si applicable>
@@ -63,7 +65,7 @@ NOUVEAU_NOM: <nouveau nom de fichier, uniquement pour renommer>
         return match.group(1).strip() if match else ""
 
     action_brute = extraire_champ("ACTION").lower()
-    actions_valides = ["classer", "preparer", "lister", "renommer", "deplacer", "supprimer", "apercu"]
+    actions_valides = ["classer", "preparer", "lister", "renommer", "deplacer", "supprimer", "apercu", "ouvrir"]
     action = next((a for a in actions_valides if a in action_brute), "inconnu")
 
     return {
@@ -124,6 +126,12 @@ def executer_action(details):
             print("Il me manque des informations pour l'aperçu (client et nom du document).")
         else:
             apercu_document(details["client"], details["document"])
+
+    elif action == "ouvrir":
+        if not details["client"] or not details["document"]:
+            print("Il me manque des informations pour ouvrir ce document (client et nom du document).")
+        else:
+            ouvrir_document(details["client"], details["document"])
 
     else:
         print("Je n'ai pas compris cette instruction.")
